@@ -99,6 +99,10 @@ export class FacebookMarketplace extends BaseMarketplace {
   }
 
   async getListingDetails(listingId: string): Promise<ListingDetails> {
+    // The id is echoed back inside the listing URL, so only a real one is accepted.
+    if (!/^\d+$/.test(listingId)) {
+      throw new Error(`Invalid Facebook listing id "${listingId}": expected the number from /marketplace/item/<id>`);
+    }
     return getListingDetails(listingId);
   }
 

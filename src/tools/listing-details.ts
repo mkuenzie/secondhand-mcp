@@ -2,7 +2,7 @@ import { getMarketplace, listMarketplaceNames, resizeEbayImageUrl } from '../mar
 import { ListingDetails } from '../types.js';
 import { booleanArg, choiceArg, countArg, stringArg } from './arguments.js';
 import { formatListingDetails } from './format.js';
-import { FetchedImage, IMAGE_SIZE_PX, ImageSize, fetchImages } from './images.js';
+import { FetchedImage, IMAGE_SIZE_PX, ImageSize, fetchImages, trustedImageUrl } from './images.js';
 import { ToolContent, ToolResult, errorResult, textResult } from './results.js';
 
 const IMAGE_MODES = ['urls', 'inline'] as const;
@@ -43,8 +43,8 @@ export async function listingDetails(args: unknown): Promise<ToolResult> {
   if (!source) return unsupportedDetails(targetMp);
 
   try {
-    const details = await source.getListingDetails(listingId);
-    if (details.images.length === 0) return textResult(formatListingDetails(details));
+    const details = withTrustedPhotos(await source.getListingDetails(listingId));
+    if (details.images.length === 0) return textResult(withoutPhotos(details));
     if (maxImages === 0) return textResult(withoutPhotos(details) + photosLeftOutText(details.images.length));
 
     const mode: ImageMode = imageMode ?? (includeImages ? 'inline' : 'urls');
@@ -76,6 +76,16 @@ interface PhotoSelection {
   size: ImageSize;
 }
 
+interface ShownDetails extends ListingDetails {
+  /** Photos dropped because they were not on the marketplace's own CDN. */
+  untrustedPhotos: number;
+}
+
+function withTrustedPhotos(details: ListingDetails): ShownDetails {
+  const images = details.images.flatMap((url) => trustedImageUrl(url) ?? []);
+  return { ...details, images, untrustedPhotos: details.images.length - images.length };
+}
+
 function photoSelection(details: ListingDetails, size: ImageSize, maxImages: number | undefined): PhotoSelection {
   const total = details.images.length;
   const urls = details.images
@@ -84,8 +94,11 @@ function photoSelection(details: ListingDetails, size: ImageSize, maxImages: num
   return { urls, total, size };
 }
 
-function withoutPhotos(details: ListingDetails): string {
-  return formatListingDetails({ ...details, images: [] });
+function withoutPhotos(details: ShownDetails): string {
+  const text = formatListingDetails({ ...details, images: [] });
+  const n = details.untrustedPhotos;
+  if (n === 0) return text;
+  return `${text}\n⚠️ ${n} photo${n > 1 ? 's' : ''} left out: not hosted on the marketplace's own image servers.`;
 }
 
 function photoUrlsText({ urls, total, size }: PhotoSelection): string {
@@ -99,11 +112,11 @@ function photosLeftOutText(total: number): string {
   return `\n\n📷 ${total} photo${total > 1 ? 's' : ''}, not included (maxImages is 0)`;
 }
 
-function urlsReply(details: ListingDetails, photos: PhotoSelection): ToolResult {
+function urlsReply(details: ShownDetails, photos: PhotoSelection): ToolResult {
   return textResult(withoutPhotos(details) + photoUrlsText(photos));
 }
 
-async function inlineReply(details: ListingDetails, photos: PhotoSelection): Promise<ToolResult> {
+async function inlineReply(details: ShownDetails, photos: PhotoSelection): Promise<ToolResult> {
   const fetched = await fetchImages(photos.urls);
   const okImages = fetched.filter((r) => r.ok);
 

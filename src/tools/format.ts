@@ -1,4 +1,6 @@
 import { Listing, ListingDetails, ListingPart, SearchParams, SearchResult } from '../types.js';
+import { trustedImageUrl } from './images.js';
+import { inert, sellerBlock } from './untrusted.js';
 
 const ALL_MARKETPLACES_PER_SOURCE = 10;
 
@@ -18,9 +20,9 @@ export function formatSingleResult(result: SearchResult, params: SearchParams, i
   ];
 
   for (const listing of cheapestFirst(result.listings)) {
-    lines.push(`**${listing.price}** - ${listing.title}`);
+    lines.push(`**${inert(listing.price)}** - ${inert(listing.title)}`);
     if (listing.location) {
-      lines.push(`   📍 ${listing.location}`);
+      lines.push(`   📍 ${inert(listing.location)}`);
     }
     lines.push(...listingFooter(listing, includeImages, '   '));
     lines.push('');
@@ -46,7 +48,7 @@ export function formatMultipleResults(results: SearchResult[], params: SearchPar
     } else {
       lines.push(`Found ${result.listings.length} listings:`);
       for (const listing of cheapestFirst(result.listings).slice(0, ALL_MARKETPLACES_PER_SOURCE)) {
-        lines.push(`  • **${listing.price}** - ${listing.title}`);
+        lines.push(`  • **${inert(listing.price)}** - ${inert(listing.title)}`);
         lines.push(...listingFooter(listing, includeImages, '    '));
       }
     }
@@ -73,7 +75,10 @@ function listingFooter(listing: Listing, includeImages: boolean, indent: string)
 
 function photoLine(images: string[] | undefined, includeImages: boolean): string | undefined {
   if (!images?.length) return undefined;
-  if (includeImages) return `🖼️ Images: ${images.join(' , ')}`;
+  if (includeImages) {
+    const trusted = images.flatMap((url) => trustedImageUrl(url) ?? []);
+    if (trusted.length > 0) return `🖼️ Images: ${trusted.join(' , ')}`;
+  }
   return `📷 ${images.length} photo${images.length > 1 ? 's' : ''}`;
 }
 
@@ -90,20 +95,20 @@ export function formatListingDetails(details: ListingDetails): string {
   ];
 
   if (details.description) {
-    lines.push(`**Description:** ${details.description}`);
+    lines.push(sellerBlock(details.description));
     lines.push('');
   }
 
   if (details.location) {
-    lines.push(`📍 ${details.location}`);
+    lines.push(`📍 ${inert(details.location)}`);
   }
 
   if (details.seller) {
-    lines.push(`👤 Seller: ${details.seller}`);
+    lines.push(`👤 Seller: ${inert(details.seller)}`);
   }
 
   if (details.deliveryTypes && details.deliveryTypes.length > 0) {
-    lines.push(`🚚 Delivery: ${details.deliveryTypes.join(', ')}`);
+    lines.push(`🚚 Delivery: ${inert(details.deliveryTypes.join(', '))}`);
   }
 
   if (details.isShippingOffered) {

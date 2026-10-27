@@ -19,8 +19,12 @@ import { Page } from 'puppeteer-core';
 const MAX_RETRIES = 8;
 const NAV_TIMEOUT = 20000;
 
+const SITE = 'depop.com';
 const SEARCH_PAGE = 'https://www.depop.com/search/';
 const PRODUCT_URL = 'https://www.depop.com/products/';
+// The listing id lands in the product URL's path, so anything beyond a slug's
+// own characters could steer the browser to another page.
+const SLUG = /^[A-Za-z0-9_-]+$/;
 
 export class DepopMarketplace extends BaseMarketplace {
   readonly name = 'depop';
@@ -40,7 +44,7 @@ export class DepopMarketplace extends BaseMarketplace {
 
       let page: Page | undefined;
       try {
-        page = await newPage();
+        page = await newPage(SITE);
         const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
         const status = resp?.status() ?? 0;
         const title = await page.title();
@@ -53,7 +57,7 @@ export class DepopMarketplace extends BaseMarketplace {
         lastError = err.message || String(err);
       }
 
-      console.log(`[depop] Attempt ${attempt + 1}/${MAX_RETRIES}: blocked (${lastError}). Rotating IP...`);
+      console.error(`[depop] Attempt ${attempt + 1}/${MAX_RETRIES}: blocked (${lastError}). Rotating IP...`);
       if (page) await page.close().catch(() => {});
     }
 
@@ -142,6 +146,9 @@ export class DepopMarketplace extends BaseMarketplace {
   }
 
   async getListingDetails(slug: string): Promise<ListingDetails> {
+    if (!SLUG.test(slug)) {
+      throw new Error(`Invalid Depop listing id "${slug}": expected the slug from /products/<slug>/`);
+    }
     return withBrowserLock(async () => {
       let page: Page | undefined;
       try {

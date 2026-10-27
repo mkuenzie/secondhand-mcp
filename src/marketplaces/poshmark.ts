@@ -16,7 +16,11 @@ import type { Page } from 'puppeteer-core';
 const MAX_RETRIES = 8;
 const NAV_TIMEOUT = 20000;
 
+const SITE = 'poshmark.com';
 const POSHMARK_BASE = 'https://poshmark.com';
+// The listing id lands in the listing URL's path, so anything beyond a slug's
+// own characters could steer the browser to another page.
+const SLUG = /^[A-Za-z0-9_-]+$/;
 const SEARCH_URL = `${POSHMARK_BASE}/search`;
 const LISTING_URL = `${POSHMARK_BASE}/listing/`;
 
@@ -48,7 +52,7 @@ export class PoshmarkMarketplace extends BaseMarketplace {
 
       let page: Page | undefined;
       try {
-        page = await newPage();
+        page = await newPage(SITE);
         const resp = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT });
         const status = resp?.status() ?? 0;
         const title = await page.title();
@@ -61,7 +65,7 @@ export class PoshmarkMarketplace extends BaseMarketplace {
         lastError = err.message || String(err);
       }
 
-      console.log(`[poshmark] Attempt ${attempt + 1}/${MAX_RETRIES}: blocked (${lastError}). Rotating IP...`);
+      console.error(`[poshmark] Attempt ${attempt + 1}/${MAX_RETRIES}: blocked (${lastError}). Rotating IP...`);
       if (page) await page.close().catch(() => {});
     }
 
@@ -156,6 +160,9 @@ export class PoshmarkMarketplace extends BaseMarketplace {
   }
 
   async getListingDetails(listingId: string): Promise<ListingDetails> {
+    if (!SLUG.test(listingId)) {
+      throw new Error(`Invalid Poshmark listing id "${listingId}": expected the slug from /listing/<slug>`);
+    }
     return withBrowserLock(async () => {
       let page: Page | undefined;
       try {

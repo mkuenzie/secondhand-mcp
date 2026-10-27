@@ -297,3 +297,14 @@ describe('detail failures', () => {
     await expect(getDetails()).resolves.toMatchObject({ description: 'Barely ridden, garage kept.' });
   });
 });
+
+describe('listing ids', () => {
+  it.each(['../../l.php?u=https://evil.example', '123abc', '12 34', ''])(
+    'refuses %j before asking Facebook',
+    async (id) => {
+      const { mock } = stubFetch(() => json(detailsBody(null)));
+      await expect(getDetails(id)).rejects.toThrow('Invalid Facebook listing id');
+      expect(mock).not.toHaveBeenCalled();
+    }
+  );
+});

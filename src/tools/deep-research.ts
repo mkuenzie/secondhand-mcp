@@ -4,6 +4,8 @@
 import { getAllMarketplaces } from '../marketplaces/index.js';
 import { Listing, SearchParams } from '../types.js';
 import { stringArg } from './arguments.js';
+import { trustedImageUrl } from './images.js';
+import { inert } from './untrusted.js';
 import { detailsSource, unsupportedDetails } from './listing-details.js';
 import { ToolResult, errorResult, textResult } from './results.js';
 
@@ -46,8 +48,8 @@ function researchResult(marketplace: string, listing: Listing): ResearchResult {
   if (listing.description) parts.push(listing.description);
   return {
     id: `${marketplace}:${listing.id}`,
-    title: listing.title,
-    text: parts.join(' · '),
+    title: inert(listing.title),
+    text: inert(parts.join(' · ')),
     url: listing.url,
   };
 }
@@ -64,19 +66,18 @@ export async function researchFetch(args: unknown): Promise<ToolResult> {
 
   try {
     const details = await source.getListingDetails(listingId);
+    const description = details.description ? inert(details.description) : '';
     return textResult(
       JSON.stringify({
         id,
-        title:
-          details.description?.split('\n')[0]?.slice(0, TITLE_MAX_CHARS) ||
-          `Listing ${listingId} on ${marketplaceName}`,
-        text: details.description || '',
+        title: description.split('\n')[0].slice(0, TITLE_MAX_CHARS) || `Listing ${listingId} on ${marketplaceName}`,
+        text: description,
         url: details.url,
         metadata: {
           marketplace: marketplaceName,
-          location: details.location,
-          seller: details.seller,
-          images: details.images,
+          location: details.location && inert(details.location),
+          seller: details.seller && inert(details.seller),
+          images: details.images.flatMap((url) => trustedImageUrl(url) ?? []),
           deliveryTypes: details.deliveryTypes,
           isShippingOffered: details.isShippingOffered,
           unavailable: details.unavailable,
