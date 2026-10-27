@@ -81,6 +81,8 @@ On macOS, the first time you search Depop or Poshmark, you may see a system prom
 
 The browser runs invisibly in the background and only launches when you actually search Depop or Poshmark.
 
+It is locked down, because the pages it opens carry content written by sellers and advertisers. Chrome's sandbox stays on (it is turned off only when the server runs as root, as in most containers, because Chrome won't start sandboxed as root). Scripts are disabled, and the browser loads nothing but HTML pages from depop.com or poshmark.com: no images, fonts, or third-party resources.
+
 ## Configuration
 
 ### Choosing Marketplaces
@@ -131,6 +133,10 @@ Common values:
 | `EBAY_CA` | ebay.ca |
 
 The full list is available in the [eBay API docs](https://developer.ebay.com/api-docs/static/rest-request-components.html#marketpl).
+
+### Facebook Proxy
+
+If `SMARTPROXY_URL` is set (for example `http://user:pass@proxy.example:7000`), all Facebook requests are sent through that HTTP proxy. This helps when Facebook rate-limits your IP. The proxy can see every Facebook search you make, so only use one you trust. Leave it unset to connect directly.
 
 ## Tools
 
@@ -210,6 +216,10 @@ Useful for research-style clients that expect these standard tool names; for fil
 **Depop** — Uses a headless browser to search listings with support for category, condition, size, and color filters. The browser instance is shared across requests.
 
 **Poshmark** — Uses a headless browser to search listings with support for condition, size, color, sort, and price filters. Poshmark is not location-based — all items ship nationally.
+
+**Listing content** — Titles, descriptions, seller names and locations are written by sellers, so the server treats them as untrusted. Markdown that could make a client load a URL is escaped, hidden characters are removed, and descriptions are wrapped in `<seller-text>` markers that the seller can't forge. The server's instructions also tell the assistant to treat listing text as information, never as instructions. Photo URLs are only shown or fetched when they're HTTPS on the marketplace's own image CDN. Server-side photo fetches re-check every redirect against that same list and stop at 10 MB.
+
+None of this makes prompt injection impossible. If your MCP client can also run shell commands or edit files, keep approval prompts turned on for those tools.
 
 ## Development
 
