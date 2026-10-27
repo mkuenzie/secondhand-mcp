@@ -60,12 +60,12 @@ export async function getBrowser(): Promise<Browser> {
     executablePath,
     protocolTimeout: 60000,
     args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
+      // Chrome's sandbox is what contains a page that exploits it, so it stays
+      // on. Chrome refuses to start sandboxed as root, which is how containers
+      // usually run; only there is it given up.
+      ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',
-      '--no-zygote',
       '--disable-extensions',
       '--disable-background-networking',
       '--disable-software-rasterizer',
@@ -76,11 +76,35 @@ export async function getBrowser(): Promise<Browser> {
   return browser;
 }
 
-export async function newPage(): Promise<Page> {
+/**
+ * A page that loads nothing but `site`'s own HTML. The scrapers read the
+ * server-rendered markup, so no script runs and no image, font or third-party
+ * resource is fetched: seller photos and ad scripts, the parts of a page a
+ * hostile listing or advertiser controls, never reach the browser. A redirect
+ * to another host is refused rather than followed.
+ */
+export async function newPage(site: string): Promise<Page> {
   const b = await getBrowser();
   const page = await b.newPage();
   await page.setViewport({ width: 1280, height: 800 });
+  await page.setJavaScriptEnabled(false);
+  await page.setRequestInterception(true);
+  page.on('request', (request) => {
+    if (request.isInterceptResolutionHandled()) return;
+    if (isSiteDocument(request.resourceType(), request.url(), site)) request.continue();
+    else request.abort();
+  });
   return page;
+}
+
+export function isSiteDocument(resourceType: string, url: string, site: string): boolean {
+  if (resourceType !== 'document') return false;
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === 'https:' && (hostname === site || hostname.endsWith(`.${site}`));
+  } catch {
+    return false;
+  }
 }
 
 export async function closeBrowser(): Promise<void> {

@@ -1085,3 +1085,44 @@ describe('Depop health check', () => {
     await expect(new DepopMarketplace().healthCheck()).resolves.toBe(false);
   });
 });
+
+describe('browser page scope', () => {
+  it('opens Depop pages scoped to depop.com', async () => {
+    use(fakePage({ roots: [] }));
+    await new DepopMarketplace().search({ query: 'x' });
+    await new DepopMarketplace().getListingDetails('u-blue-coat');
+    expect(vi.mocked(newPage).mock.calls).toEqual([['depop.com'], ['depop.com']]);
+  });
+
+  it('opens Poshmark pages scoped to poshmark.com', async () => {
+    use(fakePage({ roots: [] }));
+    await new PoshmarkMarketplace().search({ query: 'x' });
+    await new PoshmarkMarketplace().getListingDetails(`coat-${HEX}`);
+    expect(vi.mocked(newPage).mock.calls).toEqual([['poshmark.com'], ['poshmark.com']]);
+  });
+
+  it('logs retries to stderr, never to stdout where the MCP messages go', async () => {
+    const log = vi.spyOn(console, 'log');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(newPage).mockRejectedValue(new Error('blocked'));
+    await new DepopMarketplace().search({ query: 'x' });
+    await new PoshmarkMarketplace().search({ query: 'x' });
+    expect(log).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('[depop] Attempt 1/8'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('[poshmark] Attempt 1/8'));
+  });
+});
+
+describe('listing ids that are not slugs', () => {
+  const BAD = ['../../account', 'x?redirect=https://evil.example', 'x#frag', 'a/b', 'x y', '%2e%2e', ''];
+
+  it.each(BAD)('Depop refuses %j before opening a page', async (id) => {
+    await expect(new DepopMarketplace().getListingDetails(id)).rejects.toThrow('Invalid Depop listing id');
+    expect(newPage).not.toHaveBeenCalled();
+  });
+
+  it.each(BAD)('Poshmark refuses %j before opening a page', async (id) => {
+    await expect(new PoshmarkMarketplace().getListingDetails(id)).rejects.toThrow('Invalid Poshmark listing id');
+    expect(newPage).not.toHaveBeenCalled();
+  });
+});

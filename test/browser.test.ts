@@ -16,11 +16,30 @@ async function load() {
   return import('../src/browser.js');
 }
 
+function fakePage() {
+  return {
+    setViewport: vi.fn().mockResolvedValue(undefined),
+    setJavaScriptEnabled: vi.fn().mockResolvedValue(undefined),
+    setRequestInterception: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
+  };
+}
+
 function fakeBrowser(connected = true) {
   return {
     connected,
-    newPage: vi.fn().mockResolvedValue({ setViewport: vi.fn().mockResolvedValue(undefined) }),
+    newPage: vi.fn().mockResolvedValue(fakePage()),
     close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function fakeRequest(resourceType: string, url: string, handled = false) {
+  return {
+    resourceType: () => resourceType,
+    url: () => url,
+    isInterceptResolutionHandled: () => handled,
+    continue: vi.fn(),
+    abort: vi.fn(),
   };
 }
 
@@ -84,14 +103,26 @@ describe('getBrowser', () => {
     expect(launch.mock.calls[0][0].executablePath).toBe('/opt/chrome');
   });
 
-  it('launches headless with a sandbox-free arg set', async () => {
+  it('launches headless with the sandbox on', async () => {
     process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/chrome';
+    vi.spyOn(process, 'getuid').mockReturnValue(501);
     launch.mockResolvedValue(fakeBrowser());
     const { getBrowser } = await load();
     await getBrowser();
     const opts = launch.mock.calls[0][0];
     expect(opts.headless).toBe(true);
-    expect(opts.args).toContain('--no-sandbox');
+    for (const flag of ['--no-sandbox', '--disable-setuid-sandbox', '--single-process', '--no-zygote']) {
+      expect(opts.args).not.toContain(flag);
+    }
+  });
+
+  it('gives up the sandbox only when running as root, where Chrome refuses it', async () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/chrome';
+    vi.spyOn(process, 'getuid').mockReturnValue(0);
+    launch.mockResolvedValue(fakeBrowser());
+    const { getBrowser } = await load();
+    await getBrowser();
+    expect(launch.mock.calls[0][0].args).toContain('--no-sandbox');
   });
 
   it('names the paths it checked when Chrome is missing', async () => {
@@ -128,8 +159,63 @@ describe('newPage', () => {
     const b = fakeBrowser();
     launch.mockResolvedValue(b);
     const { newPage } = await load();
-    const page = await newPage();
+    const page = await newPage('depop.com');
     expect(page.setViewport).toHaveBeenCalledWith({ width: 1280, height: 800 });
+  });
+
+  it('turns scripts off and intercepts every request', async () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/chrome';
+    launch.mockResolvedValue(fakeBrowser());
+    const { newPage } = await load();
+    const page = await newPage('depop.com');
+    expect(page.setJavaScriptEnabled).toHaveBeenCalledWith(false);
+    expect(page.setRequestInterception).toHaveBeenCalledWith(true);
+    expect(page.on).toHaveBeenCalledWith('request', expect.any(Function));
+  });
+
+  it('lets only the site\'s own documents through', async () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/chrome';
+    launch.mockResolvedValue(fakeBrowser());
+    const { newPage } = await load();
+    const page = await newPage('depop.com');
+    const onRequest = (page.on as ReturnType<typeof vi.fn>).mock.calls[0][1];
+
+    const page1 = fakeRequest('document', 'https://www.depop.com/products/x/');
+    const photo = fakeRequest('image', 'https://media-photos.depop.com/p.jpg');
+    const elsewhere = fakeRequest('document', 'https://evil.example/');
+    for (const r of [page1, photo, elsewhere]) onRequest(r);
+
+    expect(page1.continue).toHaveBeenCalled();
+    expect(photo.abort).toHaveBeenCalled();
+    expect(elsewhere.abort).toHaveBeenCalled();
+  });
+
+  it('leaves a request another handler already resolved', async () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = '/opt/chrome';
+    launch.mockResolvedValue(fakeBrowser());
+    const { newPage } = await load();
+    const page = await newPage('depop.com');
+    const onRequest = (page.on as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    const request = fakeRequest('document', 'https://www.depop.com/', true);
+    onRequest(request);
+    expect(request.continue).not.toHaveBeenCalled();
+    expect(request.abort).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSiteDocument', () => {
+  it.each([
+    ['document', 'https://www.depop.com/search/', true],
+    ['document', 'https://depop.com/', true],
+    ['document', 'http://www.depop.com/', false],
+    ['document', 'https://depop.com.evil.example/', false],
+    ['document', 'https://notdepop.com/', false],
+    ['script', 'https://www.depop.com/app.js', false],
+    ['image', 'https://media-photos.depop.com/p.jpg', false],
+    ['document', 'not a url', false],
+  ])('%s %s → %s', async (type, url, expected) => {
+    const { isSiteDocument } = await load();
+    expect(isSiteDocument(type, url, 'depop.com')).toBe(expected);
   });
 });
 
